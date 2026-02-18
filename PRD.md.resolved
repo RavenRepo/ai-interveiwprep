@@ -1,0 +1,82 @@
+# Product Requirements Document (PRD)
+# AI Interview Preparation Platform
+
+## 1. Problem Statement
+Job seekers often struggle with technical interviews due to a lack of realistic practice, immediate feedback, and personalized guidance. Traditional mock interviews are expensive or hard to schedule, while static coding platforms lack the pressure and interaction of a real interview.
+
+## 2. Product Goals
+-   **Realistic Simulation**: Mimic the environment of a real video interview using AI avatars and voice interaction.
+-   **Instant Feedback**: Provide immediate, actionable feedback on answers, covering both technical accuracy and soft skills.
+-   **Personalization**: Tailor questions to the user's specific resume and target job role.
+-   **Accessibility**: Make high-quality interview coaching accessible 24/7 without human interviewers.
+
+---
+
+## 3. User Personas
+
+### **Alex (The Job Seeker)**
+-   **Background**: Junior Software Developer looking for their first big role.
+-   **Pain Point**: Nervous about speaking technically and explaining thought processes.
+-   **Goal**: Wants to practice answering behavioral and technical questions out loud.
+
+### **Priya (The Career Switcher)**
+-   **Background**: Transitioning from Marketing to Data Science.
+-   **Pain Point**: unsure if her resume highlights the right skills and what questions to expect.
+-   **Goal**: Wants interview questions strictly relevant to her new field and resume.
+
+---
+
+## 4. Functional Requirements
+
+### 4.1. Authentication & Profile
+-   **FR-01**: Users can register and login using email/password.
+-   **FR-02**: Users can manage their profile (name, career goals).
+-   **FR-03**: Users can view their interview history and progress stats.
+
+### 4.2. Resume Parsing
+-   **FR-04**: Users can upload a resume (PDF/DOCX).
+-   **FR-05**: System extracts text from the resume to influence question generation.
+
+### 4.3. Interview Session
+-   **FR-06**: Users can start a new interview by selecting a Job Role (e.g., "Java Developer", "Product Manager").
+-   **FR-07**: System generates 5 unique questions based on the role and resume (OpenAI GPT-4).
+-   **FR-08**: An AI Avatar reads the question aloud to the user (D-ID + ElevenLabs).
+-   **FR-09**: Users answer via microphone/camera (Video recording).
+-   **FR-10**: System transcribes the user's spoken answer (AssemblyAI).
+
+### 4.4. Feedback & Analytics
+-   **FR-11**: System analyzes the transcribed answer against the question.
+-   **FR-12**: System provides a score (1-100) and structured feedback (Strengths, Weaknesses, Tips).
+-   **FR-13**: Users can review past sessions, including video playback and written feedback.
+
+---
+
+## 5. Non-Functional Requirements
+-   **Performance**: Audio transcription should complete within 30 seconds of submission.
+-   **Reliability**: Video uploads to S3 must be retried on failure.
+-   **Scalability**: The system should support concurrent interview sessions.
+-   **Security**: Personal data (resumes, videos) must be stored securely.
+
+---
+
+## 6. User Flows
+
+### **Start Interview Flow**
+1.  User logs in -> Dashboard.
+2.  User uploads Resume (optional).
+3.  User clicks "Start Interview" -> Selects "Senior Backend Engineer".
+4.  System generates interview context.
+5.  User enters "Interview Room".
+
+### **Question-Answer Flow**
+1.  Avatar reads Question 1.
+2.  User clicks "Start Recording".
+3.  User answers the question.
+4.  User clicks "Stop Recording" -> "Submit".
+5.  Video uploads -> Transcribes -> AI Generated Feedback.
+6.  System moves to Question 2.
+
+### **Review Flow**
+1.  Interview finishes.
+2.  User sees "Interview Summary" (Overall Score).
+3.  User clicks specific question to see "Detailed Feedback".

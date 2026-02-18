@@ -1,0 +1,372 @@
+import React, { useCallback, useEffect, useState } from "react";
+import {
+  Alert,
+  Box,
+  Button,
+  Card,
+  CardContent,
+  CircularProgress,
+  Container,
+  FormControl,
+  InputLabel,
+  MenuItem,
+  Select,
+  Typography,
+} from "@mui/material";
+import {
+  CloudUpload,
+  Description,
+  PlayArrow,
+  CheckCircle,
+  Videocam,
+  LightbulbOutlined,
+} from "@mui/icons-material";
+import { JobRole, Resume } from "../../types";
+import { interviewService } from "../../services/interview.service";
+import { videoService } from "../../services/video.service";
+import { useMediaPermissions } from "../../hooks/useMediaPermissions";
+import api from "../../services/api.service";
+
+// ============================================================
+// Props
+// ============================================================
+
+interface InterviewStartProps {
+  onStart: (interviewId: number) => void;
+}
+
+// ============================================================
+// InterviewStart Component
+// ============================================================
+
+const InterviewStart: React.FC<InterviewStartProps> = ({ onStart }) => {
+  const [selectedJobRole, setSelectedJobRole] = useState<number | null>(null);
+  const [resumeId, setResumeId] = useState<number | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [hasResume, setHasResume] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const [jobRoles, setJobRoles] = useState<JobRole[]>([]);
+  const [resume, setResume] = useState<Resume | null>(null);
+  const [isLoadingData, setIsLoadingData] = useState(true);
+  const [isUploading, setIsUploading] = useState(false);
+
+  const { hasPermission, checkPermissions } = useMediaPermissions();
+
+  // ============================================================
+  // Fetch job roles and resume on mount
+  // ============================================================
+
+  useEffect(() => {
+    const fetchData = async () => {
+      setIsLoadingData(true);
+      try {
+        // Fetch job roles
+        const rolesResponse = await api.get<JobRole[]>("/api/job-roles");
+        setJobRoles(rolesResponse.data);
+
+        // Check for existing resume
+        try {
+          const userResume = await videoService.getMyResume();
+          setResume(userResume);
+          setResumeId(userResume.id);
+          setHasResume(true);
+        } catch {
+          // No resume uploaded yet — that's fine
+          setHasResume(false);
+        }
+      } catch (err: any) {
+        setError("Failed to load interview setup data.");
+      } finally {
+        setIsLoadingData(false);
+      }
+    };
+
+    fetchData();
+  }, []);
+
+  // ============================================================
+  // Resume upload
+  // ============================================================
+
+  const handleResumeUpload = useCallback(
+    async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+
+      setIsUploading(true);
+      setError(null);
+
+      try {
+        const uploaded = await videoService.uploadResume(file);
+        setResume(uploaded);
+        setResumeId(uploaded.id);
+        setHasResume(true);
+      } catch (err: any) {
+        setError(err.message || "Failed to upload resume.");
+      } finally {
+        setIsUploading(false);
+      }
+    },
+    [],
+  );
+
+  // ============================================================
+  // Start interview
+  // ============================================================
+
+  const handleStart = useCallback(async () => {
+    if (!resumeId || !selectedJobRole) return;
+
+    // Check camera permissions first
+    if (!hasPermission) {
+      await checkPermissions();
+      if (!hasPermission) {
+        setError(
+          "Camera and microphone access is required for video interviews.",
+        );
+        return;
+      }
+    }
+
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      const result = await interviewService.startInterview(
+        resumeId,
+        selectedJobRole,
+      );
+      onStart(result.interviewId);
+    } catch (err: any) {
+      setError(err.message || "Failed to start interview. Please try again.");
+    } finally {
+      setIsLoading(false);
+    }
+  }, [resumeId, selectedJobRole, hasPermission, checkPermissions, onStart]);
+
+  // ============================================================
+  // Validations
+  // ============================================================
+
+  const canStart = hasResume && selectedJobRole !== null && !isLoading;
+
+  // ============================================================
+  // Loading state
+  // ============================================================
+
+  if (isLoadingData) {
+    return (
+      <Container maxWidth="sm" sx={{ py: 8, textAlign: "center" }}>
+        <CircularProgress size={48} sx={{ mb: 2 }} />
+        <Typography color="text.secondary">
+          Loading interview setup...
+        </Typography>
+      </Container>
+    );
+  }
+
+  // ============================================================
+  // Render
+  // ============================================================
+
+  return (
+    <Container maxWidth="sm" sx={{ py: 4 }}>
+      <Typography variant="h4" fontWeight={700} gutterBottom>
+        Start New Interview
+      </Typography>
+      <Typography color="text.secondary" sx={{ mb: 3 }}>
+        Upload your resume, select a job role, and begin your AI-powered
+        practice interview.
+      </Typography>
+
+      {/* Error Alert */}
+      {error && (
+        <Alert severity="error" onClose={() => setError(null)} sx={{ mb: 3 }}>
+          {error}
+        </Alert>
+      )}
+
+      {/* ===== Section 1: Resume Status Card ===== */}
+      <Card
+        elevation={0}
+        sx={{
+          mb: 3,
+          borderRadius: 3,
+          border: "1px solid",
+          borderColor: "divider",
+        }}
+      >
+        <CardContent sx={{ p: 3 }}>
+          <Typography variant="subtitle1" fontWeight={600} gutterBottom>
+            Resume
+          </Typography>
+
+          {hasResume && resume ? (
+            <Box sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>
+              <CheckCircle color="success" />
+              <Box sx={{ flex: 1 }}>
+                <Typography variant="body2" fontWeight={500}>
+                  {resume.fileName}
+                </Typography>
+                <Typography variant="caption" color="text.secondary">
+                  Uploaded {new Date(resume.uploadedAt).toLocaleDateString()}
+                </Typography>
+              </Box>
+              <Button component="label" size="small" variant="text">
+                Replace
+                <input
+                  type="file"
+                  hidden
+                  accept=".pdf,.doc,.docx"
+                  onChange={handleResumeUpload}
+                />
+              </Button>
+            </Box>
+          ) : (
+            <Box sx={{ textAlign: "center", py: 2 }}>
+              <Description
+                sx={{ fontSize: 40, color: "text.disabled", mb: 1 }}
+              />
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                Upload your resume so the AI can tailor questions to your
+                experience.
+              </Typography>
+              <Button
+                component="label"
+                variant="outlined"
+                startIcon={
+                  isUploading ? <CircularProgress size={18} /> : <CloudUpload />
+                }
+                disabled={isUploading}
+              >
+                {isUploading ? "Uploading..." : "Upload Resume"}
+                <input
+                  type="file"
+                  hidden
+                  accept=".pdf,.doc,.docx"
+                  onChange={handleResumeUpload}
+                />
+              </Button>
+            </Box>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* ===== Section 2: Job Role Selector ===== */}
+      <Card
+        elevation={0}
+        sx={{
+          mb: 3,
+          borderRadius: 3,
+          border: "1px solid",
+          borderColor: "divider",
+        }}
+      >
+        <CardContent sx={{ p: 3 }}>
+          <Typography variant="subtitle1" fontWeight={600} gutterBottom>
+            Job Role
+          </Typography>
+          <FormControl fullWidth size="small">
+            <InputLabel id="job-role-label">Select a job role</InputLabel>
+            <Select
+              labelId="job-role-label"
+              value={selectedJobRole ?? ""}
+              label="Select a job role"
+              onChange={(e) => setSelectedJobRole(e.target.value as number)}
+            >
+              {jobRoles.map((role) => (
+                <MenuItem key={role.id} value={role.id}>
+                  <Box>
+                    <Typography variant="body2" fontWeight={500}>
+                      {role.title}
+                    </Typography>
+                    {role.description && (
+                      <Typography variant="caption" color="text.secondary">
+                        {role.description}
+                      </Typography>
+                    )}
+                  </Box>
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+        </CardContent>
+      </Card>
+
+      {/* ===== Section 3: Interview Type (future toggle) ===== */}
+      <Card
+        elevation={0}
+        sx={{
+          mb: 3,
+          borderRadius: 3,
+          border: "1px solid",
+          borderColor: "divider",
+        }}
+      >
+        <CardContent sx={{ p: 3 }}>
+          <Typography variant="subtitle1" fontWeight={600} gutterBottom>
+            Interview Type
+          </Typography>
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>
+            <Videocam color="primary" />
+            <Box>
+              <Typography variant="body2" fontWeight={500}>
+                Video Interview
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                Record video responses to AI-generated questions
+              </Typography>
+            </Box>
+          </Box>
+        </CardContent>
+      </Card>
+
+      {/* ===== Section 4: Tips & Instructions ===== */}
+      <Alert
+        icon={<LightbulbOutlined />}
+        severity="info"
+        sx={{ mb: 3, borderRadius: 2 }}
+      >
+        <Typography variant="subtitle2" fontWeight={600} gutterBottom>
+          Interview Tips
+        </Typography>
+        <Typography variant="body2" component="ul" sx={{ pl: 2, m: 0 }}>
+          <li>Find a quiet, well-lit space with a neutral background.</li>
+          <li>Test your camera and microphone before starting.</li>
+          <li>Speak clearly and maintain eye contact with the camera.</li>
+          <li>Each question has a maximum response time of 3 minutes.</li>
+          <li>You can re-record your answer before submitting.</li>
+        </Typography>
+      </Alert>
+
+      {/* Camera permission status */}
+      {hasPermission === false && (
+        <Alert severity="warning" sx={{ mb: 3, borderRadius: 2 }}>
+          Camera access is required. Please allow access when prompted.
+        </Alert>
+      )}
+
+      {/* ===== Start Button ===== */}
+      <Button
+        variant="contained"
+        size="large"
+        fullWidth
+        startIcon={
+          isLoading ? (
+            <CircularProgress size={20} color="inherit" />
+          ) : (
+            <PlayArrow />
+          )
+        }
+        onClick={handleStart}
+        disabled={!canStart}
+        sx={{ py: 1.5, fontSize: "1rem", borderRadius: 2 }}
+      >
+        {isLoading ? "Starting Interview..." : "Start Interview"}
+      </Button>
+    </Container>
+  );
+};
+
+export default InterviewStart;

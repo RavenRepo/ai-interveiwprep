@@ -1,0 +1,135 @@
+# Technical Reference & Architecture Guide
+# AI Interview Preparation Platform
+
+> **Target Audience**: Senior Engineers & AI Agents
+> **Purpose**: Provide a complete, end-to-end technical dissection of the platform, enabling immediate context loading for development, debugging, and architectural review.
+
+---
+
+## 1. System Context & Architecture
+
+The platform allows users to practice technical interviews by simulating a real-time interaction with an AI avatar. It orchestrates multiple generative AI services to create a coherent feedback loop.
+
+### 1.1 High-Level Architecture Diagram
+
+```mermaid
+graph TD
+    User[Clients (Web/Mobile)] -->|HTTPS/REST| LB[Load Balancer / Nginx]
+    LB -->|API Requests| Backend[Spring Boot Backend]
+    
+    subgraph "Backend Infrastructure"
+        Backend -->|Persist Data| DB[(MySQL 8.0)]
+        Backend -->|Store Media| S3[AWS S3 Bucket]
+    end
+    
+    subgraph "AI Services Layer"
+        Backend -->|Generate Logic| OpenAI[OpenAI GPT-4]
+        Backend -->|Generate Avatar Video| DID[D-ID API]
+        Backend -->|Synthesize Speech| Eleven[ElevenLabs TTS]
+        Backend -->|Transcribe Answer| Assembly[AssemblyAI STT]
+    end
+```
+
+### 1.2 Tech Stack Decisions
+
+| Layer | Technology | Decision Rationale |
+| :--- | :--- | :--- |
+| **Frontend** | React 19, TypeScript | Strict typing for reliability; React 19 for modern concurrency features; MUI for rapid, accessible UI development. |
+| **Backend** | Java 17, Spring Boot 3 | Robust ecosystem, strict compile-time safety, easy integration with enterprise-grade libraries (Spring Security, Data JPA). |
+| **Database** | MySQL 8.0 | Relational integrity essential for structured interview data (Users <-> Interviews <-> Questions <-> Responses). |
+| **Async** | Java `CompletableFuture` | Non-blocking orchestration of long-running AI tasks (video generation, transcription) without freezing HTTP threads. |
+| **Auth** | JWT (Stateless) | Scalable authentication; decouples frontend state from backend sessions. |
+
+---
+
+## 2. Key Workflows & Data Flow
+
+### 2.1 Authentication Flow
+The system uses **stateless JWT authentication**.
+
+1.  **Frontend**: User submits credentials to `/api/auth/login`.
+2.  **Backend**: [AuthController](file:///Users/shresthchauhan/Documents/Projects/AI-Interview-Preparation-Platform/ai%20interview%20project/backend/src/main/java/com/interview/platform/controller/AuthController.java#11-59) delegates to `AuthenticationManager`.
+3.  **Security**: `DaoAuthenticationProvider` checks BCrypt-hashed password in MySQL.
+4.  **Token**: If valid, [JwtTokenProvider](file:///Users/shresthchauhan/Documents/Projects/AI-Interview-Preparation-Platform/ai%20interview%20project/backend/src/main/java/com/interview/platform/config/JwtTokenProvider.java#13-89) signs a JWT (HS256) containing [sub](file:///Users/shresthchauhan/Documents/Projects/AI-Interview-Preparation-Platform/ai%20interview%20project/backend/src/main/java/com/interview/platform/service/InterviewService.java#153-210) (email) and `iat`/`exp` claims.
+5.  **Per-Request**:
+    *   Frontend [api.service.ts](file:///Users/shresthchauhan/Documents/Projects/AI-Interview-Preparation-Platform/ai%20interview%20project/frontend/src/services/api.service.ts) Axios interceptor injects `Authorization: Bearer <token>`.
+    *   Backend `JwtAuthenticationFilter` intercepts request -> validates signature -> sets `SecurityContextHolder`.
+
+### 2.2 Interview Orchestration (The "Core Loop")
+This is the most complex flow, involving multiple async AI calls.
+
+**Phase 1: Initialization**
+1.  User uploads Resume (PDF/DOCX) -> Backend extracts text (Apache PDFBox/POI).
+2.  User selects Job Role -> `InterviewService.startInterview()`.
+3.  **Synchronous**: Backend calls **OpenAI GPT-4** to generate 5 JSON-structured questions based on Resume + Role.
+4.  **Asynchronous (Fire-and-Forget)**:
+    *   For each generated question, [AvatarVideoService](file:///Users/shresthchauhan/Documents/Projects/AI-Interview-Preparation-Platform/ai%20interview%20project/backend/src/main/java/com/interview/platform/service/AvatarVideoService.java#19-321) requests a video from **D-ID**.
+    *   Question is saved immediately with `avatarVideoUrl = null`.
+    *   When D-ID completes (webhook or polling), the URL is updated.
+
+**Phase 2: User Response**
+1.  User watches Avatar video -> Records Answer (WebAPI MediaRecorder).
+2.  Frontend uploads `Blob` to `/api/interviews/{id}/submit`.
+3.  **Backend**:
+    *   Saves video to **AWS S3**.
+    *   Triggers **AssemblyAI** for async transcription.
+    *   Returns 200 OK immediately ("Response Received").
+4.  **Background**: AssemblyAI webhook/polling updates [Response](file:///Users/shresthchauhan/Documents/Projects/AI-Interview-Preparation-Platform/ai%20interview%20project/backend/src/main/java/com/interview/platform/model/Response.java#7-137) entity with `transcription` text.
+
+**Phase 3: Feedback Generation**
+1.  User clicks "Complete Interview".
+2.  Backend aggregates all Q&A pairs (Question Text + Transcribed Answer).
+3.  Backend sends prompt to **OpenAI** for comprehensive analysis.
+4.  Result stored in [Feedback](file:///Users/shresthchauhan/Documents/Projects/AI-Interview-Preparation-Platform/ai%20interview%20project/frontend/src/types/index.ts#87-96) entity (Score, Strengths, Weaknesses).
+
+---
+
+## 3. Backend Deep Dive
+
+### 3.1 Package Structure (`com.interview.platform`)
+*   `config/`: **Critical**. Contains [SecurityConfig](file:///Users/shresthchauhan/Documents/Projects/AI-Interview-Preparation-Platform/ai%20interview%20project/backend/src/main/java/com/interview/platform/config/SecurityConfig.java#21-69) (filter chains), [AsyncConfig](file:///Users/shresthchauhan/Documents/Projects/AI-Interview-Preparation-Platform/ai%20interview%20project/backend/src/main/java/com/interview/platform/config/AsyncConfig.java#10-25) (thread pools for AI calls), and `WebConfig` (CORS).
+*   `controller/`: Thin layer. DTO <-> Entity mapping happens here or in Service. Global Exception Handler (`GlobalExceptionHandler`) catches all runtime exceptions and returns standard [ApiError](file:///Users/shresthchauhan/Documents/Projects/AI-Interview-Preparation-Platform/ai%20interview%20project/frontend/src/types/index.ts#136-141) JSON.
+*   `service/`: **Fat services**. Contains all business logic.
+    *   [InterviewService](file:///Users/shresthchauhan/Documents/Projects/AI-Interview-Preparation-Platform/ai%20interview%20project/backend/src/main/java/com/interview/platform/service/InterviewService.java#17-356): Orchestrator. Relies on specialized services ([OpenAIService](file:///Users/shresthchauhan/Documents/Projects/AI-Interview-Preparation-Platform/ai%20interview%20project/backend/src/main/java/com/interview/platform/service/OpenAIService.java#21-273), [VideoStorageService](file:///Users/shresthchauhan/Documents/Projects/AI-Interview-Preparation-Platform/ai%20interview%20project/backend/src/main/java/com/interview/platform/service/VideoStorageService.java#19-184)).
+    *   [VideoStorageService](file:///Users/shresthchauhan/Documents/Projects/AI-Interview-Preparation-Platform/ai%20interview%20project/backend/src/main/java/com/interview/platform/service/VideoStorageService.java#19-184): Abstraction over S3. Currently creates unique file keys based on `userId/interviewId/questionId`.
+
+### 3.2 Database Schema (ERD Description)
+*   **User** [(1) ---- (N)](file:///Users/shresthchauhan/Documents/Projects/AI-Interview-Preparation-Platform/ai%20interview%20project/frontend/src/App.tsx#198-228) **Resume**
+*   **User** [(1) ---- (N)](file:///Users/shresthchauhan/Documents/Projects/AI-Interview-Preparation-Platform/ai%20interview%20project/frontend/src/App.tsx#198-228) **Interview**
+*   **Interview** [(1) ---- (N)](file:///Users/shresthchauhan/Documents/Projects/AI-Interview-Preparation-Platform/ai%20interview%20project/frontend/src/App.tsx#198-228) **Question**
+*   **Question** [(1) ---- (0..1)](file:///Users/shresthchauhan/Documents/Projects/AI-Interview-Preparation-Platform/ai%20interview%20project/frontend/src/App.tsx#198-228) **Response**
+*   **Interview** [(1) ---- (0..1)](file:///Users/shresthchauhan/Documents/Projects/AI-Interview-Preparation-Platform/ai%20interview%20project/frontend/src/App.tsx#198-228) **Feedback**
+
+> **Note**: [JobRole](file:///Users/shresthchauhan/Documents/Projects/AI-Interview-Preparation-Platform/ai%20interview%20project/backend/src/main/java/com/interview/platform/model/JobRole.java#5-77) is a lookup table seeded with 15 common roles (e.g., "Frontend Developer", "DevOps Engineer").
+
+---
+
+## 4. Frontend Deep Dive
+
+### 4.1 State Management
+*   **Global Auth**: [AuthContext.tsx](file:///Users/shresthchauhan/Documents/Projects/AI-Interview-Preparation-Platform/ai%20interview%20project/frontend/src/context/AuthContext.tsx) holds the [User](file:///Users/shresthchauhan/Documents/Projects/AI-Interview-Preparation-Platform/ai%20interview%20project/backend/src/main/java/com/interview/platform/model/User.java#12-128) object and [isAuthenticated](file:///Users/shresthchauhan/Documents/Projects/AI-Interview-Preparation-Platform/ai%20interview%20project/frontend/src/services/api.service.ts#93-96) flag. It initializes by checking `localStorage` for a token and verifying it with `/api/auth/profile`.
+*   **Network Resilience**: [api.service.ts](file:///Users/shresthchauhan/Documents/Projects/AI-Interview-Preparation-Platform/ai%20interview%20project/frontend/src/services/api.service.ts) has a response interceptor that listens for `401 Unauthorized`. It dispatches a custom `auth:logout` event to force the UI to redirect to Login, ensuring the user isn't stuck in a bad state.
+
+### 4.2 Component Hierarchy
+*   [App.tsx](file:///Users/shresthchauhan/Documents/Projects/AI-Interview-Preparation-Platform/ai%20interview%20project/frontend/src/App.tsx): Routing root. Uses [ProtectedRoute](file:///Users/shresthchauhan/Documents/Projects/AI-Interview-Preparation-Platform/ai%20interview%20project/frontend/src/App.tsx#20-34) wrapper to block unauthenticated access.
+*   [Dashboard](file:///Users/shresthchauhan/Documents/Projects/AI-Interview-Preparation-Platform/ai%20interview%20project/frontend/src/components/Dashboard/Dashboard.tsx#67-419): Main hub. Fetches `interviewRepository.findByUserId` via service.
+*   [Interview/](file:///Users/shresthchauhan/Documents/Projects/AI-Interview-Preparation-Platform/ai%20interview%20project/frontend/src/types/index.ts#39-49):
+    *   [InterviewStart](file:///Users/shresthchauhan/Documents/Projects/AI-Interview-Preparation-Platform/ai%20interview%20project/frontend/src/components/Interview/InterviewStart.tsx#42-334): Resume/Role selection.
+    *   [InterviewRoom](file:///Users/shresthchauhan/Documents/Projects/AI-Interview-Preparation-Platform/ai%20interview%20project/frontend/src/components/Interview/InterviewRoom.tsx#32-233): The "Active" state. Manages `mediaStream` state, recording logic, and question navigation.
+    *   [InterviewReview](file:///Users/shresthchauhan/Documents/Projects/AI-Interview-Preparation-Platform/ai%20interview%20project/frontend/src/components/Interview/InterviewReview.tsx#80-487): Read-only view of completed interview with video playback.
+
+---
+
+## 5. Development & Deployment
+
+### 5.1 Environment Variables
+Strictly separated configuration.
+*   **Backend**: [application.properties](file:///Users/shresthchauhan/Documents/Projects/AI-Interview-Preparation-Platform/ai%20interview%20project/backend/src/main/resources/application.properties) reads from env vars (`OPENAI_API_KEY`, `DB_PASSWORD`, etc.) with safe defaults for dev.
+*   **Frontend**: [.env](file:///Users/shresthchauhan/Documents/Projects/AI-Interview-Preparation-Platform/ai%20interview%20project/frontend/.env) handles API base URL (`REACT_APP_API_URL`).
+
+### 5.2 CI/CD Pipelines (Recommended)
+*   **Build**:
+    *   Backend: `./mvnw clean package` (Produces JAR)
+    *   Frontend: `npm run build` (Produces static [build/](file:///Users/shresthchauhan/Documents/Projects/AI-Interview-Preparation-Platform/ai%20interview%20project/backend/src/main/java/com/interview/platform/dto/AuthResponse.java#59-62) folder)
+*   **Docker**:
+    *   `Dockerfile` in root can leverage multi-stage builds to serve frontend static assets via Spring Boot or Nginx.

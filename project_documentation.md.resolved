@@ -1,0 +1,130 @@
+# AI Interview Preparation Platform - Project Documentation
+
+## 1. Project Overview
+The **AI Interview Preparation Platform** is a full-stack application designed to help users practice for job interviews using AI-driven feedback. It simulates real interview scenarios with audio/video questions and responses, providing detailed analysis of the user's performance.
+
+### Tech Stack
+-   **Frontend**: React (v19), TypeScript, Material-UI (MUI v5), Axios.
+-   **Backend**: Java (Spring Boot 3), Hibernate/JPA, Maven.
+-   **Database**: MySQL 8.0 (Containerized via Docker).
+-   **AI Services**:
+    -   **OpenAI (GPT-4)**: Generates interview questions and feedback.
+    -   **ElevenLabs**: Text-to-Speech (TTS) for reading questions.
+    -   **D-ID**: Generates animated AI avatar videos.
+    -   **AssemblyAI**: Speech-to-Text (STT) for transcribing user answers.
+-   **Storage**: AWS S3 (configured but currently disabled/mocked).
+
+---
+
+## 2. System Architecture
+
+The application follows a standard client-server architecture:
+1.  **Frontend**: Single Page Application (SPA) served by React. Handles UI, recording, and API communication.
+2.  **Backend**: RESTful API built with Spring Boot. Handles business logic, database interactions, and integrations with external AI services.
+3.  **Database**: MySQL instance storing persistent data (users, interviews, feedback, etc.).
+
+---
+
+## 3. Folder Structure
+
+### Backend (`/backend`)
+```
+src/main/java/com/interview/platform/
+├── config/           # Configuration classes (Security, CORS, Async, External APIs)
+├── controller/       # REST Controllers (API Endpoints)
+├── dto/              # Data Transfer Objects (Request/Response models)
+├── entity/ (model/)  # JPA Entities (Database Tables)
+├── exception/        # Global Exception Handling
+├── repository/       # Data Access Interfaces (Spring Data JPA)
+└── service/          # Business Logic and External Service Integrations
+```
+
+### Frontend (`/frontend`)
+```
+src/
+├── components/       # UI Components
+│   ├── Auth/         # Login/Register forms
+│   ├── Dashboard/    # User dashboard
+│   ├── Interview/    # Interview flow (Start, Room, Feedback)
+│   ├── Common/       # Reusable components (VideoPlayer, Navigation)
+│   └── ...
+├── context/          # React Context (AuthContext)
+├── hooks/            # Custom Hooks (useAuth, useMediaPermissions)
+├── services/         # API Service integrations (Axios)
+├── types/            # TypeScript Interfaces and Types
+└── utils/            # Helper functions
+```
+
+---
+
+## 4. Database Schema
+
+The database `interview_platform` contains the following key entities:
+
+-   **User**: Stores user credentials and profile (`id`, `name`, `email`, `password`).
+-   **Resume**: User's uploaded resume text (`id`, `user_id`, `extracted_text`, `file_url`).
+-   **JobRole**: Available job roles for practice (`id`, `title`, `description`).
+-   **Interview**: An interview session (`id`, `user_id`, `job_role`, `status`, `score`).
+-   **Question**: Individual questions in an interview (`id`, `interview_id`, `text`, `audio_url`).
+-   **Response**: User's answer to a question (`id`, `question_id`, `video_url`, `transcription`).
+-   **Feedback**: AI analysis of the interview (`id`, `interview_id`, `score`, `strengths`, `weaknesses`).
+
+---
+
+## 5. API Endpoints
+
+### Authentication (`/api/auth`)
+-   `POST /register`: Create a new account.
+-   `POST /login`: Authenticate and receive JWT.
+-   `GET /profile`: Get current user details.
+
+### Interviews (`/api/interviews`)
+-   `POST /start`: Start a new interview session.
+-   `GET /{id}`: Get interview status and details.
+-   `POST /{id}/submit`: Submit an answer (video/audio).
+-   `POST /{id}/feedback`: Generate/fetch AI feedback.
+
+### Resumes (`/api/resumes`)
+-   `POST /upload`: Upload and parse a resume file.
+
+---
+
+## 6. Setup and Run Instructions
+
+### Prerequisites
+-   Node.js (v18+)
+-   Java JDK 17+
+-   Docker & Docker Compose
+-   Maven
+
+### Step 1: Database
+Start the MySQL container:
+```bash
+docker-compose up -d
+```
+
+### Step 2: Backend
+Navigate to `backend` and run the application:
+```bash
+cd backend
+./mvnw spring-boot:run
+```
+*The backend runs on http://localhost:8080*
+
+### Step 3: Frontend
+Navigate to `frontend`, install dependencies, and start the dev server:
+```bash
+cd frontend
+npm install
+npm start
+```
+*The frontend runs on http://localhost:3000*
+
+### Step 4: Access
+Open your browser to `http://localhost:3000`. Register a new account to begin.
+
+---
+
+## 7. External Service Configuration
+API keys are configured in `backend/src/main/resources/application.properties`.
+For local development, placeholder keys may be used if specific AI features (TTS/Avatar) are not required, but OpenAI keys are needed for question generation.
